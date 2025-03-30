@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func main() {
+func resourceExhaution() {
 	var wg sync.WaitGroup
 	var sharedLock sync.Mutex
 	const runtime = 1 * time.Second

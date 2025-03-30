@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-func main() {
+func salutation() {
 	// welcome を返す
 	// スコープの中で使われている変数をさらに小さいスコープ（ゴールーチン）で読み出す場合はアドレスを参照
 	salutation := "hello"

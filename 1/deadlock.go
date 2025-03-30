@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func main() {
+func deadlock() {
 	type value struct {
 		mu    sync.Mutex
 		value int

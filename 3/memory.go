@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-func main() {
+func memory() {
 	memConsumed := func() uint64 {
 		runtime.GC()
 		var s runtime.MemStats
