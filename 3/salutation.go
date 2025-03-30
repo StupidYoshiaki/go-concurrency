@@ -17,8 +17,10 @@ func main() {
 	}()
 	wg.Wait()
 	fmt.Println(salutation)
+	fmt.Println()
 
-	// ランダムに値を返す
+	// forループがゴールーチンよりも先に終わる
+	// 最後にsalutationに保持されている値の good day を返す
 	for _, salutation = range []string{"hello", "greetings", "good day"} {
 		wg.Add(1)
 		go func() {
@@ -27,4 +29,16 @@ func main() {
 		}()
 	}
 	wg.Wait()
+	fmt.Println()
+
+	// コピーした値をクロージャーに渡せば大丈夫
+	for _, salutation = range []string{"hello", "greetings", "good day"} {
+		wg.Add(1)
+		go func(salutation string) {
+			defer wg.Done()
+			fmt.Println(salutation)
+		}(salutation)
+	}
+	wg.Wait()
+	fmt.Println()
 }
