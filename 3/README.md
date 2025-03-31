@@ -1,27 +1,33 @@
 # 質疑応答
-## 目次
 - [質疑応答](#質疑応答)
-  - [目次](#目次)
-  - [me](#me)
-  - [lm](#lm)
-    - [詳細な説明](#詳細な説明)
-      - [1. `for _, salutation = range ...` の場合](#1-for-_-salutation--range--の場合)
-      - [2. `for _, salutation := range ...` の場合](#2-for-_-salutation--range--の場合)
-    - [まとめ](#まとめ)
-  - [me](#me-1)
-  - [lm](#lm-1)
-  - [me](#me-2)
-  - [lm](#lm-2)
-    - [詳細な解説](#詳細な解説)
-  - [me](#me-3)
-  - [lm](#lm-3)
-  - [me](#me-4)
-  - [lm](#lm-4)
-    - [1. nil チャネル c の役割](#1-nil-チャネル-c-の役割)
-    - [2. nil チャネルでの受信操作](#2-nil-チャネルでの受信操作)
-    - [3. ゴルーチンの解放されない理由](#3-ゴルーチンの解放されない理由)
-    - [4. WaitGroup の役割とタイミング](#4-waitgroup-の役割とタイミング)
-    - [まとめ](#まとめ-1)
+	- [me](#me)
+	- [lm](#lm)
+		- [詳細な説明](#詳細な説明)
+			- [1. `for _, salutation = range ...` の場合](#1-for-_-salutation--range--の場合)
+			- [2. `for _, salutation := range ...` の場合](#2-for-_-salutation--range--の場合)
+		- [まとめ](#まとめ)
+	- [me](#me-1)
+	- [lm](#lm-1)
+	- [me](#me-2)
+	- [lm](#lm-2)
+		- [詳細な解説](#詳細な解説)
+	- [me](#me-3)
+	- [lm](#lm-3)
+	- [me](#me-4)
+	- [lm](#lm-4)
+		- [1. nil チャネル c の役割](#1-nil-チャネル-c-の役割)
+		- [2. nil チャネルでの受信操作](#2-nil-チャネルでの受信操作)
+		- [3. ゴルーチンの解放されない理由](#3-ゴルーチンの解放されない理由)
+		- [4. WaitGroup の役割とタイミング](#4-waitgroup-の役割とタイミング)
+		- [まとめ](#まとめ-1)
+	- [me](#me-5)
+	- [lm](#lm-5)
+	- [me](#me-6)
+	- [lm](#lm-6)
+		- [コードの構造](#コードの構造)
+		- [どのような事象を実験しているか](#どのような事象を実験しているか)
+		- [なぜ producer、observer どちらも読み込みだけならRWMutexが常に速くならないのか](#なぜ-producerobserver-どちらも読み込みだけならrwmutexが常に速くならないのか)
+		- [結論](#結論)
 
 ## me
 以下のコードを実行したとき、次の表な表示になります。
@@ -267,3 +273,185 @@ noop := func() {
 - この仕組みが「ゴルーチンが解放されない」という状態を実現しています。
 
 このように、変数 `c` の定義と noop 関数内での `<-c` によって、ゴルーチンが永久にブロックされ、解放されない状態になるのです。
+
+## me
+このコードにおいて、beginチャネルが送信を開始し始めるのはどのタイミングですか？関数を定義した段階では呼び出されないと思いますし、begin変数を定義した段階ではまだ関数が定義されていない状態です。なので、ゴールーチンとして関数を実行した時でしょうか？教えてください。
+
+```
+package main_test
+
+import (
+	"sync"
+	"testing"
+)
+
+func BenchmarkContextSwitch(b *testing.B) {
+	var wg sync.WaitGroup
+	begin := make(chan struct{})
+	c := make(chan struct{})
+
+	var token struct{}
+	sender := func() {
+		defer wg.Done()
+		<-begin
+		for i := 0; i < b.N; i++ {
+			c <- token
+		}
+	}
+	receiver := func() {
+		defer wg.Done()
+		<-begin
+		for i := 0; i < b.N; i++ {
+			<-c
+		}
+	}
+
+	wg.Add(2)
+	go sender()
+	go receiver()
+	b.StartTimer()
+	close(begin)
+	wg.Wait()
+}
+```
+
+## lm
+このコードでは、begin チャネルはゴルーチン内の sender と receiver で最初に `<-begin` として受信待ちされ、b.StartTimer() の直後に close(begin) が呼ばれることで、待機していた両ゴルーチンが一斉にブロックから解放され、処理を開始します。
+
+つまり、begin チャネルからの「送信」は、関数定義や変数宣言の段階ではなく、実際にゴルーチンが走り始めた後、b.StartTimer() の直後に close(begin) が実行されたときに発生する、ということです。
+
+## me
+このコードについて説明してください。どのような事象を実験できているのでしょうか。producer、observer関数はどちらも読み込みだけを必要としているから、専有ロックするよりも動作が早くなるということでしょうか。それなら、全ての事象において結果はRWの方が早くなるはずです。解説お願いします。
+
+```
+func rwMutex() {
+	producer := func(wg *sync.WaitGroup, l sync.Locker) {
+		defer wg.Done()
+		for i := 0; i < 5; i++ {
+			l.Lock()
+			l.Unlock()
+			time.Sleep(1)
+		}
+	}
+
+	observer := func(wg *sync.WaitGroup, l sync.Locker) {
+		defer wg.Done()
+		l.Lock()
+		defer l.Unlock()
+	}
+
+	test := func(count int, mutex, rwMutex sync.Locker) time.Duration {
+		var wg sync.WaitGroup
+		wg.Add(count + 1)
+		beginTestTime := time.Now()
+		go producer(&wg, mutex)
+		for i := count; i > 0; i-- {
+			go observer(&wg, rwMutex)
+		}
+
+		wg.Wait()
+		return time.Since(beginTestTime)
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 1, 2, ' ', 0)
+	defer tw.Flush()
+
+	var m sync.RWMutex
+	fmt.Fprintf(tw, "Readers\tRWMutex\tMutex\n")
+	for i := 0; i < 20; i++ {
+		count := int(math.Pow(2, float64(i)))
+		fmt.Fprintf(
+			tw,
+			"%d\t%v\t%v\n",
+			count,
+			test(count, &m, m.RLocker()),
+			test(count, &m, &m),
+		)
+	}
+
+}
+```
+```
+Readers  RWMutex      Mutex
+1        98.167µs     18.583µs
+2        12.042µs     12.375µs
+4        8.042µs      4.375µs
+8        14.25µs      9.375µs
+16       21.542µs     11.5µs
+32       21.25µs      40.375µs
+64       36.917µs     54.75µs
+128      49.333µs     35.25µs
+256      79.792µs     78.833µs
+512      165.625µs    124µs
+1024     228.5µs      264.583µs
+2048     495.375µs    496.875µs
+4096     1.010542ms   1.020875ms
+8192     1.802375ms   1.682958ms
+16384    3.325167ms   6.516417ms
+32768    7.412333ms   9.03025ms
+65536    14.018625ms  18.135375ms
+131072   27.562084ms  35.904583ms
+262144   56.4725ms    71.956709ms
+524288   111.8665ms   144.712708ms
+```
+
+## lm
+このコードは、1つの「producer」と多数の「observer」が同じミューテックスを使ってアクセスする状況で、排他ロック（Mutex）と読み取り専用ロック（RWMutexのRLocker()）の性能の違いがどのようにスケールするかを実験しています。
+
+---
+
+### コードの構造
+
+1. **producer 関数**  
+   - 5回のループで、毎回ロックとアンロックを行い、その後短いスリープ（time.Sleep(1)）を挟みます。  
+   - この関数は常に「専有」ロックを使います（test 関数の引数として渡される `mutex` は &m です）。
+
+2. **observer 関数**  
+   - 1回だけロックとアンロックを行います。  
+   - ここで、test 関数に渡されるロッカー `l` は、実験によって2通りです。  
+     - 1つは `m.RLocker()`（RWMutexの読み取りロック）  
+     - もう1つは `&m`（通常のMutexによる排他ロック）
+
+3. **test 関数**  
+   - 指定された数（count）だけ observer をゴルーチンとして起動し、同時に1つの producer も起動します。  
+   - 処理開始直前に b.StartTimer() を呼び、直後に begin チャネルを close して、producer と observer の両方が同時に動き出すようにしています。  
+   - 全てのゴルーチンが完了するまで待機し、経過時間を返します。
+
+4. **ベンチマーク実行部**  
+   - 観測者（observer）の数を 2^0 から 2^19（1〜524288）まで変化させながら、RWMutex と Mutex のそれぞれのロック方式で test を実行し、かかった時間を比較しています。
+
+---
+
+### どのような事象を実験しているか
+
+- **読み取り専用ロック vs 排他ロックの性能比較**  
+  観測者は単にロックを取得してすぐ解放するだけの操作なので、データの書き換えなどは行いません。  
+  - RWMutex の RLocker() は複数のゴルーチンが同時に読み取りを行う場合、同時実行が可能です。  
+  - 一方、通常の Mutex は排他制御なので、たとえ読み込みだけでも順番に実行されます。
+
+- **スケールとオーバーヘッドの関係**  
+  - 観測者の数が少ない場合、RWMutex の内部処理は通常の Mutex よりも複雑なため、かえってわずかに遅くなることもあります。  
+  - しかし、観測者が多くなると、複数のゴルーチンが同時に読み取りロックを取得できるメリットが発揮され、全体としては RWMutex の方が高速になる傾向が見られます。
+
+---
+
+### なぜ producer、observer どちらも読み込みだけならRWMutexが常に速くならないのか
+
+- **producer は排他ロックを使う**  
+  producer の処理では、ロックとアンロックの繰り返しと短い待ち（time.Sleep）が入っています。  
+  この処理は RWMutex を使う場合でも通常の Mutex と同じ排他ロック（書き込みロック）を使用するので、どちらのケースでも同じです。
+
+- **observer のみが差異の対象**  
+  observer は、RWMutex を使う場合は読み取り専用ロックを取得でき、複数の observer が同時にロックを保持できるというメリットがあります。  
+  ただし、observer の処理自体が非常に短い（ロックしてすぐ解放するだけ）ため、ロック取得のオーバーヘッドが RWMutex の内部処理のコストに近づく場合、読取専用ロックが必ずしも圧倒的に速くなるとは限りません。
+
+- **結果としての挙動**  
+  実験結果の表からも分かるように、観測者の数や状況により、RWMutex と Mutex のどちらが速いかは変動します。  
+  つまり、読み込みのみの場合でも、システムの負荷やロックの取得コストの相対的なオーバーヘッド次第で、必ずしも RWMutex の方が一律に速いというわけではないということです。
+
+---
+
+### 結論
+
+このコードは、単一の書き込み（producer）と多数の読み込み（observer）というシナリオにおいて、RWMutex（読み取り専用ロックを利用）と通常のMutex（排他ロックのみ）のパフォーマンスの違いを測定しています。  
+- **読み込みだけの場合、理論上は複数同時にアクセスできる RWMutex にメリットがありますが、ロックのオーバーヘッドやシナリオ全体の構成により、常に速いとは限らない**という点を示しています。

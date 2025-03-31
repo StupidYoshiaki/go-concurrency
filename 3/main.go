@@ -1,6 +1,9 @@
 package main
 
 func main() {
-	salutation()
-	memory()
+	// salutation()
+	// memory()
+	// waitGroup()
+	// mutex()
+	rwMutex()
 }
