@@ -5,5 +5,7 @@ func main() {
 	// memory()
 	// waitGroup()
 	// mutex()
-	rwMutex()
+	// rwMutex()
+	// cond()
+	broadcast()
 }
