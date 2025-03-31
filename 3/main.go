@@ -7,5 +7,8 @@ func main() {
 	// mutex()
 	// rwMutex()
 	// cond()
-	broadcast()
+	// broadcast()
+	// once()
+	// pool()
+	mem()
 }
