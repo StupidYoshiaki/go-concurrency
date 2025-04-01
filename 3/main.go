@@ -15,5 +15,7 @@ func main() {
 	// closeChannel()
 	// bufferChannel()
 	// simpleSelect()
-	multiSelect()
+	// multiSelect()
+	// timeout()
+	defaultSelect()
 }

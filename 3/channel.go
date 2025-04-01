@@ -112,3 +112,36 @@ func multiSelect() {
 
 	fmt.Printf("c1Count: %d\nc2Count: %d\n", c1Count, c2Count)
 }
+
+func timeout() {
+	var c <-chan int
+	select {
+	case <-c:
+	case <-time.After(1 * time.Second):
+		fmt.Println("Timed out.")
+	}
+}
+
+func defaultSelect() {
+	done := make(chan interface{})
+	go func() {
+		time.Sleep(5 * time.Second)
+		close(done)
+	}()
+
+	workCounter := 0
+loop:
+	for {
+		select {
+		case <-done:
+			break loop
+		default:
+		}
+
+		// Simulate work
+		workCounter++
+		time.Sleep(1 * time.Second)
+	}
+
+	fmt.Printf("Achieved %v cycles of work before signalled to stop.\n", workCounter)
+}
