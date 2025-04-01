@@ -10,5 +10,10 @@ func main() {
 	// broadcast()
 	// once()
 	// pool()
-	mem()
+	// mem()
+	// readChannel()
+	// closeChannel()
+	// bufferChannel()
+	// simpleSelect()
+	multiSelect()
 }
