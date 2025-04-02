@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -13,7 +14,9 @@ func main() {
 	// lexicalRestriction()
 	// unsafeRestriction()
 	// cancelSignal()
-	cancelSignalWrite()
+	// cancelSignalWrite()
+	// orChannel()
+	badErrorHandling()
 }
 
 func adhocRestriction() {
@@ -176,4 +179,129 @@ func cancelSignalWrite() {
 	close(done)
 	// sleepしないと出力する前にメインゴールーチンが終わっちゃう
 	time.Sleep(1 * time.Second)
+}
+
+// https://speakerdeck.com/pirosikick/goyan-yu-niyorubing-xing-chu-li-4-dot-4-ortiyaneru-falsetu を参照されたし
+func orChannel() {
+	var or func(channels ...<-chan interface{}) <-chan interface{}
+	or = func(channels ...<-chan interface{}) <-chan interface{} {
+		switch len(channels) {
+		case 0:
+			return nil
+		case 1:
+			return channels[0]
+		}
+
+		orDone := make(chan interface{})
+		go func() {
+			defer close(orDone)
+			switch len(channels) {
+			case 2:
+				select {
+				case <-channels[0]:
+				case <-channels[1]:
+				}
+			default:
+				select {
+				case <-channels[0]:
+				case <-channels[1]:
+				case <-channels[2]:
+				case <-or(append(channels[3:], orDone)...):
+				}
+			}
+		}()
+
+		return orDone
+	}
+
+	sig := func(after time.Duration) <-chan interface{} {
+		c := make(chan interface{})
+		go func() {
+			defer close(c)
+			time.Sleep(after)
+		}()
+		return c
+	}
+
+	start := time.Now()
+	<-or(
+		sig(2*time.Hour),
+		sig(5*time.Minute),
+		sig(1*time.Second),
+		sig(1*time.Hour),
+		sig(1*time.Minute),
+	)
+	fmt.Printf("done after %v", time.Since(start))
+}
+
+func badErrorHandling() {
+	checkStatus := func(
+		done <-chan interface{},
+		urls ...string,
+	) <-chan *http.Response {
+		responses := make(chan *http.Response)
+		go func() {
+			defer close(responses)
+			for _, url := range urls {
+				resp, err := http.Get(url)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+				select {
+				case <-done:
+					return
+				case responses <- resp:
+				}
+			}
+		}()
+		return responses
+	}
+
+	done := make(chan interface{})
+	defer close(done)
+
+	urls := []string{"https://www.google.com", "https://badhost"}
+	for response := range checkStatus(done, urls...) {
+		fmt.Printf("Response: %v\n", response.Status)
+	}
+}
+
+func goodErrorHandling() {
+	type Result struct {
+		Error    error
+		Response *http.Response
+	}
+	checkStatus := func(
+		done <-chan interface{},
+		urls ...string,
+	) <-chan Result {
+		results := make(chan Result)
+		go func() {
+			defer close(results)
+
+			for _, url := range urls {
+				var result Result
+				resp, err := http.Get(url)
+				result = Result{Error: err, Response: resp}
+				select {
+				case <-done:
+					return
+				case results <- result:
+				}
+			}
+		}()
+		return results
+	}
+
+	done := make(chan interface{})
+	defer close(done)
+
+	urls := []string{"https://www.google.com", "https://badhost"}
+	for result := range checkStatus(done, urls...) {
+		if result.Error != nil {
+			fmt.Printf("error: %v", result.Error)
+		}
+		fmt.Printf("Response: %v\n", result.Response.Status)
+	}
 }
